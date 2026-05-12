@@ -1,7 +1,6 @@
 import asyncio
 import os
 import random
-import re
 import sys
 import time
 from datetime import date, timedelta
@@ -117,7 +116,7 @@ async def pick_date(page, target: date) -> None:
     print(f"[*] Mouse-clicked {target} at ({x:.0f}, {y:.0f})")
 
 
-async def export_csv(page) -> str:
+async def export_csv(page) -> None:
     today = date.today()
     start = today - timedelta(days=10)
 
@@ -139,11 +138,9 @@ async def export_csv(page) -> str:
     await pick_date(page, today)
     await asyncio.sleep(0.8)
 
-    # Dismiss calendar by clicking the modal header
     await page.locator("#dialogs").get_by_text("Reports").first.click()
     await asyncio.sleep(0.5)
 
-    # Wait for Export CSV to become enabled
     export_btn = page.locator('button:has-text("Export CSV")')
     print("[*] Waiting for Export CSV to become enabled ...")
     for _ in range(30):
@@ -153,7 +150,7 @@ async def export_csv(page) -> str:
         await asyncio.sleep(0.3)
     else:
         await page.screenshot(path="export_btn_debug.png")
-        print("[!] Export CSV still disabled — screenshot saved -> export_btn_debug.png")
+        print("[!] Export CSV still disabled — screenshot saved")
 
     print("[*] Clicking Export CSV ...")
     async with page.expect_download(timeout=30_000) as dl_info:
@@ -162,12 +159,9 @@ async def export_csv(page) -> str:
 
     download = await dl_info.value
     filename = f"zodia_transactions_{start}_{today}.csv"
-
     temp_path = await download.path()
-    print(f"[*] Download captured at temp path: {temp_path}")
-
+    print(f"[*] Download captured: {temp_path}")
     upload_to_s3(temp_path, filename)
-
     await download.delete()
     print("[*] Temp file deleted.")
 
@@ -175,9 +169,7 @@ async def export_csv(page) -> str:
 def upload_to_s3(temp_path: str, filename: str) -> None:
     aws_key    = _require_env("AWS_ACCESS_KEY_ID")
     aws_secret = _require_env("AWS_SECRET_ACCESS_KEY")
-
     s3_key = S3_PREFIX + filename
-
     print(f"[*] Uploading to s3://{S3_BUCKET}/{s3_key} ...")
     s3 = boto3.client(
         "s3",
@@ -223,7 +215,21 @@ async def login():
         page = await context.new_page()
 
         print("[*] Loading login page ...")
-        await page.goto(LOGIN_URL, wait_until="networkidle")
+        await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(3.0)
+        await page.screenshot(path="login_result.png")
+        print(f"[*] Page loaded. URL: {page.url}")
+
+        print("[*] Waiting for username input ...")
+        try:
+            await page.wait_for_selector(
+                'input[placeholder="Enter username"]', timeout=60_000
+            )
+        except PlaywrightTimeoutError:
+            await page.screenshot(path="login_result.png")
+            print("[!] Username input not found — screenshot saved -> login_result.png")
+            await browser.close()
+            sys.exit(1)
 
         print("[*] Entering credentials ...")
         username_input = page.locator('input[placeholder="Enter username"]')
@@ -250,7 +256,7 @@ async def login():
 
         remaining = 30 - (int(time.time()) % 30)
         if remaining < 4:
-            print(f"[*] TOTP window expires in {remaining}s - waiting for next window ...")
+            print(f"[*] TOTP window expires in {remaining}s - waiting ...")
             await asyncio.sleep(remaining + 1)
 
         otp_code = totp.now()
@@ -267,9 +273,8 @@ async def login():
             print(f"[!] Portfolio URL not reached. Current URL: {page.url}")
             await page.screenshot(path="login_result.png")
             print("[*] Screenshot saved -> login_result.png")
-            input("\nPress Enter to close the browser ...")
             await browser.close()
-            return
+            sys.exit(1)
 
         await export_csv(page)
 
