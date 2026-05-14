@@ -38,4 +38,4 @@ jobs:
         run: playwright install chromium
 
       - name: Run CoinsPH automation
-        run: python coin.ph.py
+        run: run: python Coinsph.py
