@@ -1,0 +1,77 @@
+name: CoinsPH FX Export
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 1 * * 1-5"   # 9:30 AM Singapore / Manila time approx
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          pip install \
+            playwright \
+            boto3 \
+            botocore
+
+      - name: Install Playwright Chromium
+        run: |
+          playwright install chromium
+
+      - name: Debug repo files
+        run: |
+          echo "Current directory:"
+          pwd
+
+          echo ""
+          echo "Repository structure:"
+          find .
+
+      - name: Run CoinsPH automation
+        env:
+          COINSPH_EMAIL: ${{ secrets.COINSPH_EMAIL }}
+          COINSPH_PASSWORD: ${{ secrets.COINSPH_PASSWORD }}
+          COINSPH_TOTP_SECRET: ${{ secrets.COINSPH_TOTP_SECRET }}
+
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+          S3_PREFIX: coinsph_fx/raw
+          AWS_REGION: ap-southeast-1
+
+        run: |
+          xvfb-run -a python coinsph.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinsph-screenshots
+          path: .tmp/
+
+      - name: Upload CSV files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coinsph-csv
+          path: .tmp/*.csv
