@@ -3,7 +3,7 @@ name: Fetch Merchant Transactions
 on:
   schedule:
     - cron: "0 0 * * *"   # runs daily at midnight UTC
-  workflow_dispatch:        # also allows manual trigger from GitHub UI
+  workflow_dispatch:        # manual trigger from GitHub UI
 
 jobs:
   fetch:
@@ -11,8 +11,11 @@ jobs:
     timeout-minutes: 30
 
     env:
-      TB_API_KEY:    ${{ secrets.TB_API_KEY }}
-      TB_SECRET_KEY: ${{ secrets.TB_SECRET_KEY }}
+      TB_API_KEY:            ${{ secrets.TB_API_KEY }}
+      TB_SECRET_KEY:         ${{ secrets.TB_SECRET_KEY }}
+      AWS_ACCESS_KEY_ID:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET:             ${{ secrets.S3_BUCKET }}
 
     steps:
       - name: Checkout repository
@@ -24,14 +27,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests boto3
 
-      - name: Fetch transactions
+      - name: Fetch transactions and upload to S3
         run: python fetch_merchant_transactions.py
-
-      - name: Upload CSV
-        uses: actions/upload-artifact@v4
-        with:
-          name: transactions-${{ github.run_id }}
-          path: transactions_*.csv
-          retention-days: 30

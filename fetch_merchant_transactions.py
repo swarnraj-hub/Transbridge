@@ -1,11 +1,19 @@
+import csv
 import hashlib
 import os
 import requests
+import boto3
 from datetime import datetime, timedelta, timezone
 
 API_KEY = os.environ["TB_API_KEY"]
 SECRET_KEY = os.environ["TB_SECRET_KEY"]
 BASE_URL = "https://api.transactbridge.com"
+
+AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
+AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
+S3_BUCKET = os.environ["S3_BUCKET"]
+S3_PREFIX = "transact_bridge/raw"
+AWS_REGION = "ap-southeast-1"
 
 
 def generate_signature(api_key: str, secret_key: str) -> str:
@@ -30,7 +38,6 @@ def get_all_merchants(headers: dict) -> list:
 
 
 def get_deposit_txs_page(merchant_id: str, headers: dict, from_date: str, to_date: str, page: int) -> tuple[list, bool]:
-    """Returns (records, has_more) for a single page."""
     url = f"{BASE_URL}/transaction/v1.0/getDepositTxs"
     payload = {
         "userId": merchant_id,
@@ -49,7 +56,6 @@ def get_deposit_txs_page(merchant_id: str, headers: dict, from_date: str, to_dat
 
 
 def get_all_deposit_txs(merchant_id: str, headers: dict, from_date: str, to_date: str) -> list:
-    """Loops through every page using hasMore flag and returns all transactions for one merchant."""
     all_txs = []
     page = 1
 
@@ -119,6 +125,17 @@ def flatten_transaction(tx: dict) -> dict:
     }
 
 
+def upload_to_s3(local_path: str, s3_key: str) -> None:
+    s3 = boto3.client(
+        "s3",
+        region_name=AWS_REGION,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+    )
+    s3.upload_file(local_path, S3_BUCKET, s3_key)
+    print(f"Uploaded to s3://{S3_BUCKET}/{s3_key}")
+
+
 def main():
     today = datetime.now(timezone.utc)
     from_date = (today - timedelta(days=10)).strftime("%Y-%m-%d")
@@ -127,7 +144,7 @@ def main():
     signature = generate_signature(API_KEY, SECRET_KEY)
     headers = get_headers(signature)
 
-    print(f"Fetching merchants...")
+    print("Fetching merchants...")
     merchants = get_all_merchants(headers)
     print(f"Found {len(merchants)} merchants")
 
@@ -152,15 +169,16 @@ def main():
 
     print(f"\nTotal transactions fetched: {len(all_transactions)}")
 
-    # Save to CSV
     if all_transactions:
-        import csv
-        output_file = f"transactions_{from_date}_to_{to_date}.csv"
-        with open(output_file, "w", newline="", encoding="utf-8") as f:
+        filename = f"transactions_{from_date}_to_{to_date}.csv"
+        with open(filename, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=all_transactions[0].keys())
             writer.writeheader()
             writer.writerows(all_transactions)
-        print(f"Saved to {output_file}")
+        print(f"Saved locally: {filename}")
+
+        s3_key = f"{S3_PREFIX}/{filename}"
+        upload_to_s3(filename, s3_key)
 
     return all_transactions
 
